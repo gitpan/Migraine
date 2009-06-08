@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:                Migraine
-version:             0.52
+version:             0.53
 abstract:            DB schema MIGRAtor that takes headache out of the game
 license:             ~
 author:              

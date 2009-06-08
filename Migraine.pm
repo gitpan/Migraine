@@ -2,7 +2,7 @@ package Migraine;
 
 use strict;
 
-our $VERSION = "0.52"; # ==> ALSO update the version in the pod text below!
+our $VERSION = "0.53"; # ==> ALSO update the version in the pod text below!
 
 use Carp;
 use DBI;
@@ -457,7 +457,7 @@ will return ("1-3","8","10-11").
 
 =head1 VERSION
 
-    0.52
+    0.53
 
 =head1 LICENSE AND COPYRIGHT
 
