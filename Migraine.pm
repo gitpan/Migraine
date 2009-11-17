@@ -2,10 +2,11 @@ package Migraine;
 
 use strict;
 
-our $VERSION = "0.53"; # ==> ALSO update the version in the pod text below!
+our $VERSION = "0.54"; # ==> ALSO update the version in the pod text below!
 
 use Carp;
 use DBI;
+use English qw(-no_match_vars);
 
 use constant MIGRATION_REGEX           => qr/^(\d+)-.+\..+/;
 use constant MIGRAINE_META_CREATION_SQL =>
@@ -215,7 +216,9 @@ sub migrate {
         next if $self->migration_applied($cnt);
         $self->apply_migration($cnt, before_migrate => $params{before_migrate},
                                      after_migrate  => $params{after_migrate},
-                                     no_act         => $params{no_act});
+                                     no_act         => $params{no_act},
+                                     skip_missing_migrations =>
+                                            $params{skip_missing_migrations});
     }
 }
 
@@ -229,17 +232,32 @@ sub _mark_migration_as_applied {
 
 sub apply_migration {
     my ($self, $version, %user_options) = @_;
-    my %options = (no_act => 0, %user_options);
+    my %options = (no_act                  => 0,
+                   skip_missing_migrations => 0,
+                   %user_options);
 
     if ($self->migration_applied($version)) {
         croak "Migration $version already applied";
     }
 
-    if ($options{before_migrate}) {
-        $options{before_migrate}->($version,
-                                   $self->get_migration_path($version));
+    my $contents;
+    eval {
+        if ($options{before_migrate}) {
+            $options{before_migrate}->($version,
+                                       $self->get_migration_path($version));
+        }
+        $contents = $self->get_migration($version);
+    };
+    if ($EVAL_ERROR) {
+        if ($options{skip_missing_migrations}) {
+            print STDERR "Skipping migration $version: $EVAL_ERROR";
+            return;
+        }
+        else {
+            die $EVAL_ERROR;
+        }
     }
-    my $contents = $self->get_migration($version);
+
     if (defined $contents) {
         unless ($options{no_act}) {
             foreach my $query (split(/;\s*\n/, $contents)) {
@@ -260,9 +278,6 @@ sub apply_migration {
             $options{after_migrate}->($version,
                                       $self->get_migration_path($version));
         }
-    }
-    else {
-        print STDERR "Skipping migration $version: does it exist?\n";
     }
 }
 
@@ -317,15 +332,19 @@ sub get_migration_path {
                               readdir D;
     closedir D;
 
-    @migrations || croak "Can't find migration $version";
-    scalar @migrations == 1 || croak "More than one migration '$version'?!";
+    @migrations || die "Can't find migration $version\n";
+    scalar @migrations == 1 || die "More than one migration '$version'?!\n";
     return $migrations[0];
 }
 
 sub get_migration {
     my ($self, $version) = @_;
 
-    open F, $self->get_migration_path($version);
+    # This will throw an exception if it's not there, there is more than one or
+    # whatever. So we can assume everything was right.
+    my $path = $self->get_migration_path($version);
+
+    open F, $path;
     my $contents = join("", <F>);
     close F;
     return $contents;
@@ -435,13 +454,19 @@ executed, and the path for the migration file to be/just executed.
 Specifies that no migrations should be actually executed in the DB. The hooks
 B<will> be executed, though.
 
+=item C<skip_missing_migrations>
+
+Specifies that if a migration doesn't exist (or there is more than one
+migration with the same id or something similar) it will just be skipped
+instead of producing an error and stopping execution.
+
 =back
 
 =item apply_migration($id, %user_opts)
 
-Applies the given migration (C<$id>). Supports three options:
-C<before_migrate>, C<after_migrate> and C<no_act>. See the C<migrate>
-documentation for details.
+Applies the given migration (C<$id>). Supports the following options:
+C<before_migrate>, C<after_migrate>, C<no_act> and C<skip_missing_migrations>.
+See the C<migrate> documentation for details.
 
 =item applied_migrations
 
@@ -457,7 +482,7 @@ will return ("1-3","8","10-11").
 
 =head1 VERSION
 
-    0.53
+    0.54
 
 =head1 LICENSE AND COPYRIGHT
 

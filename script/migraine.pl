@@ -14,13 +14,14 @@ use File::Basename;
 
 sub HELP_MESSAGE {
     print STDERR "Syntax: migraine [options] <db-conn.yml>\n";
-    print STDERR "-n                  doesn't execute anything on the database\n";
-    print STDERR "-V                  verbose mode\n";
+    print STDERR "-c db-conn.yml      reads configuration from db-conn.yml (compatibility)\n";
+    print STDERR "-f                  force (don't stop on missing migrations)\n";
     print STDERR "-m migrations       sets the migrations directory to migrations\n";
-    print STDERR "-v mid              applies migrations up to mid, instead of all\n";
+    print STDERR "-n                  doesn't execute anything on the database\n";
     print STDERR "-o mid              only apply the given migration\n";
     print STDERR "-u                  upgrades the migraine metadata format if needed\n";
-    print STDERR "-c db-conn.yml      reads configuration from db-conn.yml (compatibility)\n";
+    print STDERR "-v mid              applies migrations up to mid, instead of all\n";
+    print STDERR "-V                  verbose mode\n";
     exit 1;
 }
 
@@ -33,18 +34,19 @@ $Getopt::Std::STANDARD_HELP_VERSION = 1;
 
 # Command-line options =======================================================
 my %opts;
-getopts('nc:m:v:Vuo:', \%opts) || HELP_MESSAGE;
+getopts('nc:m:v:Vuo:f', \%opts) || HELP_MESSAGE;
 
-my $no_act               = $opts{n} || 0;
 my $config_file          = $opts{c} || shift @ARGV;
 if (!$config_file) {
     HELP_MESSAGE;
 }
+my $force                   = $opts{f};
 my $migrations_directory    = $opts{m} || dirname($config_file)."/migrations";
-my $migrate_to_version      = $opts{v};
-my $verbose                 = $opts{V};
+my $no_act                  = $opts{n} || 0;
 my $only_apply_migration    = $opts{o};
 my $upgrade_database_format = $opts{u};
+my $migrate_to_version      = $opts{v};
+my $verbose                 = $opts{V};
 
 if (exists $opts{o} && exists $opts{v}) {
     print STDERR "ERROR: You can't specify both a single migration to apply\n\n";
@@ -112,30 +114,34 @@ else {
         }
     }
     elsif ($db_format > $Migraine::SUPPORTED_METADATA_FORMAT) {
+        print STDERR "ERROR: This version of migraine is too old for your database\n";
+        print STDERR "This migraine supports metadata format: $Migraine::SUPPORTED_METADATA_FORMAT\n";
+        print STDERR "Your database has metadata format:      $db_format\n";
         exit 1;
     }
 }
 
-my %migration_options = (no_act         => $no_act,
-                         before_migrate => sub {
-                                               my ($id, $path) = @_;
-                                               STDOUT->autoflush(1);
-                                               print "Applying migration $id ($path)... ";
-                                               if ($verbose) {
-                                                   print "\n";
-                                                   print "Migration contents:\n";
-                                                   open F, $path;
-                                                   print join("", <F>), "\n";
-                                                   close F;
-                                               }
-                                           },
-                         after_migrate  => sub {
-                                               my ($id) = @_;
-                                               print "done\n";
-                                               if ($verbose) {
-                                                   print "-" x 50, "\n";
-                                               }
-                                           });
+my %migration_options = (no_act                  => $no_act,
+                         skip_missing_migrations => $force,
+                         before_migrate          => sub {
+                             my ($id, $path) = @_;
+                             STDOUT->autoflush(1);
+                             print "Applying migration $id ($path)... ";
+                             if ($verbose) {
+                                 print "\n";
+                                 print "Migration contents:\n";
+                                 open F, $path;
+                                 print join("", <F>), "\n";
+                                 close F;
+                             }
+                         },
+                         after_migrate           => sub {
+                             my ($id) = @_;
+                             print "done\n";
+                             if ($verbose) {
+                                 print "-" x 50, "\n";
+                             }
+                         });
 
 # Prepare which migrations to apply ==========================================
 my $latest_version = $migrator->latest_version;
@@ -160,7 +166,7 @@ if (defined $only_apply_migration) {
 else {
     $migration_options{version} = $migrate_to_version || $latest_version;
     if ($migration_options{version} > $latest_version) {
-        print "Can't migrate to version $migration_options{version}. Latest is $latest_version\n";
+        print STDERR "Can't migrate to version $migration_options{version}. Latest is $latest_version\n";
         exit 1;
     }
     else {
@@ -195,6 +201,7 @@ migraine - DB schema MIGRAtor that takes headache out of the game
  $ migraine -m alternative-migrations-dir db-conn-devel.yml
  $ migraine -V -v 5 db-conn-live.yml    # Verbose, migrate up to 5
  $ migraine -o 8 db-conn-devel.yml      # Apply ONLY migration 8
+ $ migraine -f db-conn-test.yml         # Don't stop on missing migrations
 
 =head1 DESCRIPTION
 
@@ -215,14 +222,17 @@ YAML).
 
 =over 4
 
-=item -n
+=item -c db-conn.yml
 
-Doesn't execute anything on the database ("no act", like Makefile)
+Reads the configuration from C<db-conn.yml>. This option is deprecated, and
+it's maintained just temporarily for compatibility with older versions of
+migraine. You should pass your configuration file as an argument, without the
+C<-c> switch.
 
-=item -V
+=item -f
 
-Verbose mode. Give more information about what's going on, including showing
-the complete text of the migrations being applied.
+"Force": don't stop executing migrations if there's one that doesn't exist or
+has a duplicated id.
 
 =item -m /some/migrations/dir
 
@@ -230,10 +240,9 @@ Looks for migrations in the given C</some/migrations/dir> directory. The
 default is a directory called C<migrations> at the same level as the given YAML
 file.
 
-=item -v mid
+=item -n
 
-Instead of trying to apply all available migrations, it only applies pending
-migrations up to the given migration id ("migration version") C<mid>.
+Doesn't execute anything on the database ("no act", like Makefile)
 
 =item -o mid
 
@@ -246,12 +255,15 @@ B<already> applied.
 Upgrades the migraine metadata in the target database, if needed. It will
 return an error if the migraine metadata is newer than migraine supports.
 
-=item -c db-conn.yml
+=item -v mid
 
-Reads the configuration from C<db-conn.yml>. This option is deprecated, and
-it's maintained just temporarily for compatibility with older versions of
-migraine. You should pass your configuration file as an argument, without the
-C<-c> switch.
+Instead of trying to apply all available migrations, it only applies pending
+migrations up to the given migration id ("migration version") C<mid>.
+
+=item -V
+
+Verbose mode. Give more information about what's going on, including showing
+the complete text of the migrations being applied.
 
 =back
 

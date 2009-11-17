@@ -3,6 +3,7 @@
 use strict;
 use warnings;
 
+use English qw(-no_match_vars);
 use Test::More;
 use Test::Deep;
 use lib qw(t);
@@ -22,7 +23,7 @@ cmp_deeply([ $migrator->applied_migrations ],
 
 # Try to upgrade to version 11. Migration 10 doesn't exist, it shouldn't work
 eval { $migrator->migrate(version => 11); };
-ok($@,
+ok($EVAL_ERROR,
    "Migrations shouldn't be applied if there are holes in between");
 cmp_deeply([ $migrator->applied_migrations ],
            [ qw(1 2 3 4 5 6 7 8 9) ],
@@ -30,7 +31,7 @@ cmp_deeply([ $migrator->applied_migrations ],
 
 # The same, without explicit version
 eval { $migrator->migrate; };
-ok($@,
+ok($EVAL_ERROR,
    "Migrations shouldn't be applied if there are holes in between (2)");
 cmp_deeply([ $migrator->applied_migrations ],
            [ qw(1 2 3 4 5 6 7 8 9) ],
@@ -45,7 +46,7 @@ cmp_deeply([ $migrator->applied_migrations ],
 
 # Try to get version 10 after applying 11
 eval { $migrator->migrate(version => 11); };
-ok($@,
+ok($EVAL_ERROR,
    "Migrations shouldn't be applied if there are holes in between (3)");
 cmp_deeply([ $migrator->applied_migrations ],
            [ qw(1 2 3 4 5 6 7 8 9 11) ],
@@ -53,7 +54,7 @@ cmp_deeply([ $migrator->applied_migrations ],
 
 # Try to apply version 10 explicitly
 eval { $migrator->apply_migration(10); };
-ok($@,
+ok($EVAL_ERROR,
    "Non-existent migrations shouldn't be applied");
 cmp_deeply([ $migrator->applied_migrations ],
            [ qw(1 2 3 4 5 6 7 8 9 11) ],
